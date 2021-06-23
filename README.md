@@ -13,7 +13,22 @@
 
 This package contains a sharded mutex which *should* do better than a traditional `sync.RWMutex` in certain cases where you want to protect resources that are well distributed. For example, you can use this to protect a hash table as keys have no relation to each other. That being said, for the hash table use-case you should probably use `sync.Map`.
 
-The `SMutex128` works by actually creating 128 `sync.RWMutex` and providing `Lock()`, `Unlock()` methods that accept a shard argument. A shard argument can overflow the actual number of shards, and mutex uses a modulus operation to wrap around.
+The `SMutex128` works by actually creating 128 `sync.RWMutex` and providing `Lock()`, `Unlock()` methods that accept a `shard` argument. A shard argument can overflow the actual number of shards, and mutex uses a modulus operation to wrap around.
+
+
+```go
+// Acquire a write lock for shard #1
+mu.Lock(1)
+resourceInShard1 = "hello"
+
+// Release the lock in shard #1
+mu.Unlock(1)
+```
+
+## Caveats
+
+* Sharded mutex would use significantly more memory and needs to be used with care. In fact, the 128 shard implementation would use 8192 bytes of memory, and would ideally be living in L1. The reason being is that the current implementation pads mutexes so only one of them is present in a cache line, to prevent false sharing. 
+* Do benchmark on your own use-case if you want to use this library, I found that in certain cases the current implementation does not perform very well, but need to investigate a bit more. It's usually on-par with the `RWMutex` at the very least.
 
 ## Benchmarks
 
