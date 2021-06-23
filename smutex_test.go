@@ -33,6 +33,24 @@ func BenchmarkLock(b *testing.B) {
 	}
 }
 
+func BenchmarkLockUnlock(b *testing.B) {
+	b.Run("rwmutex", func(b *testing.B) {
+		var mu sync.RWMutex
+		for i := 0; i < b.N; i++ {
+			mu.Lock()
+			mu.Unlock()
+		}
+	})
+
+	b.Run("smutex", func(b *testing.B) {
+		var mu sync.RWMutex
+		for i := 0; i < b.N; i++ {
+			mu.Lock()
+			mu.Unlock()
+		}
+	})
+}
+
 func runBenchmark(b *testing.B, name string, store Store, size, procs int64) {
 	rand.Seed(1)
 	b.Run(fmt.Sprintf("%v/procs=%v", name, procs), func(b *testing.B) {
