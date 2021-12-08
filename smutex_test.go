@@ -13,12 +13,29 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const shards = 16
+
 // Store represents a concurrent store for testing
 type Store interface {
 	Set(int64, string)
 	Get(int64) string
 }
 
+/*
+cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
+BenchmarkLock/single/procs=64-8         	    7354	    159872 ns/op	     559 B/op	       0 allocs/op
+BenchmarkLock/single/procs=256-8        	   10000	    145686 ns/op	     492 B/op	       0 allocs/op
+BenchmarkLock/single/procs=1024-8       	    9230	    127378 ns/op	     455 B/op	       3 allocs/op
+BenchmarkLock/single/procs=4096-8       	    9932	    160553 ns/op	    1222 B/op	       7 allocs/op
+BenchmarkLock/single/procs=16384-8      	   11259	    123632 ns/op	    1077 B/op	      24 allocs/op
+BenchmarkLock/single/procs=65536-8      	   11756	    119162 ns/op	    3698 B/op	      90 allocs/op
+BenchmarkLock/sharded/procs=64-8        	   41248	     29622 ns/op	     652 B/op	       0 allocs/op
+BenchmarkLock/sharded/procs=256-8       	   50426	     27941 ns/op	     129 B/op	       0 allocs/op
+BenchmarkLock/sharded/procs=1024-8      	   50235	     24113 ns/op	     206 B/op	       0 allocs/op
+BenchmarkLock/sharded/procs=4096-8      	   53744	     24013 ns/op	      93 B/op	       1 allocs/op
+BenchmarkLock/sharded/procs=16384-8     	   53571	     23334 ns/op	     230 B/op	       5 allocs/op
+BenchmarkLock/sharded/procs=65536-8     	   49945	     25731 ns/op	     863 B/op	      21 allocs/op
+*/
 func BenchmarkLock(b *testing.B) {
 	size := int64(10000000)
 
@@ -33,6 +50,11 @@ func BenchmarkLock(b *testing.B) {
 	}
 }
 
+/*
+cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
+BenchmarkLockUnlock/rwmutex-8         	62175843	        18.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLockUnlock/smutex-8          	38551368	        38.84 ns/op	       0 B/op	       0 allocs/op
+*/
 func BenchmarkLockUnlock(b *testing.B) {
 	b.Run("rwmutex", func(b *testing.B) {
 		var mu sync.RWMutex
@@ -43,10 +65,10 @@ func BenchmarkLockUnlock(b *testing.B) {
 	})
 
 	b.Run("smutex", func(b *testing.B) {
-		var mu sync.RWMutex
+		mu := New(128)
 		for i := 0; i < b.N; i++ {
-			mu.Lock()
-			mu.Unlock()
+			mu.Lock(1)
+			mu.Unlock(1)
 		}
 	})
 }
@@ -69,7 +91,7 @@ func runBenchmark(b *testing.B, name string, store Store, size, procs int64) {
 }
 
 func TestMutex(t *testing.T) {
-	var mu SMutex128
+	mu := New(shards)
 	var wg sync.WaitGroup
 	var resource, out string
 
@@ -92,6 +114,29 @@ func TestMutex(t *testing.T) {
 	// Wait for the reader to finish
 	wg.Wait()
 	assert.Equal(t, "hello", out)
+}
+
+func TestRLockAll(t *testing.T) {
+	m := newSharded()
+	var wg sync.WaitGroup
+	wg.Add(512)
+	for i := 0; i < 512; i++ {
+		go func() {
+			m.Set(rand.Int63n(shards), "ok")
+			wg.Done()
+		}()
+	}
+
+	m.mu.RLockAll()
+
+	// Unlock all
+	for i := 0; i < shards; i++ {
+		m.mu.RUnlock(uint(i))
+	}
+
+	// Wait for all writers to finish
+	wg.Wait()
+	assert.True(t, true)
 }
 
 // --------------------------- Locked Map ----------------------------
@@ -139,12 +184,14 @@ func (l *lockedMap) Get(k int64) (v string) {
 
 // An implementation of a locked map using a smutex
 type shardedMap struct {
-	mu   SMutex128
+	mu   *SMutex
 	data []map[int64]string
 }
 
 func newSharded() *shardedMap {
-	m := &shardedMap{}
+	m := &shardedMap{
+		mu: New(shards),
+	}
 	for i := 0; i < shards; i++ {
 		m.data = append(m.data, map[int64]string{})
 	}
@@ -157,6 +204,7 @@ func (l *shardedMap) Set(k int64, v string) {
 	for i := 0; i < work; i++ {
 		l.data[k%shards][k] = v
 	}
+
 	runtime.Gosched()
 	for i := 0; i < work; i++ {
 		l.data[k%shards][k] = v
