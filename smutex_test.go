@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -122,12 +123,16 @@ func TestRLockAll(t *testing.T) {
 	wg.Add(512)
 	for i := 0; i < 512; i++ {
 		go func() {
-			m.Set(rand.Int63n(shards), "ok")
+			for i := 0; i < 100; i++ {
+				time.Sleep(1 * time.Millisecond)
+				m.Set(rand.Int63n(shards), "ok")
+			}
 			wg.Done()
 		}()
 	}
 
 	m.mu.RLockAll()
+	time.Sleep(10 * time.Millisecond)
 
 	// Unlock all
 	for i := 0; i < shards; i++ {
